@@ -1,0 +1,30 @@
+{
+  "name": "santa-app",
+  "version": "1.0.0",
+  "description": "Text Santa: kids share wishes, parents report naughty or nice",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/epenna212/Santa-App.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/epenna212/Santa-App/issues"
+  },
+  "homepage": "https://github.com/epenna212/Santa-App#readme",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.14.0",
+    "express": "^5.3.0",
+    "zod": "^4.6.7"
+  }
+}
