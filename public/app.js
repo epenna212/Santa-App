@@ -17,11 +17,13 @@ function el(tag, attrs = {}, ...kids) {
 async function api(method, url, body) {
   const res = await fetch(url, {
     method,
-    headers: body ? { "Content-Type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : undefined,
+    headers: method === "GET" ? {} : { "Content-Type": "application/json" },
+    body: method === "GET" ? undefined : JSON.stringify(body || {}),
     credentials: "same-origin",
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && !["/api/login", "/api/unlock", "/api/logout"].includes(url)) { go("#/"); setTimeout(route); }
+  if (data.needPin) { setTimeout(() => pinView(location.hash || "#/parent")); }
   if (!res.ok) throw Object.assign(new Error(data.error || "Something went wrong"), { status: res.status });
   return data;
 }
@@ -39,12 +41,15 @@ async function loadState() {
 async function route() {
   await loadState();
   const [, page, id] = location.hash.replace(/^#/, "").split("/");
-  if (!state.setup && page !== "setup") return go("#/setup");
   try {
-    if (page === "setup") return setupView();
+    if (!state.signedIn) {
+      if (page === "signup") return signupView();
+      if (page === "signin") return signinView();
+      return welcomeView();
+    }
     if (page === "kid" && id) return kidChatView(id);
-    if (page === "parent" && id === "chat") return state.parent ? parentChatView() : loginView("#/parent/chat");
-    if (page === "parent") return state.parent ? dashboardView() : loginView("#/parent");
+    if (page === "parent" && id === "chat") return state.grownup ? parentChatView() : pinView("#/parent/chat");
+    if (page === "parent") return state.grownup ? dashboardView() : pinView("#/parent");
     homeView();
   } catch (err) {
     render(el("p", { class: "error" }, err.message));
@@ -58,37 +63,33 @@ function countdown() {
   const d = state.daysUntilChristmas;
   return el("div", { class: "countdown" }, d === 0 ? "🎄 It's Christmas! 🎄" : `🎄 ${d} day${d === 1 ? "" : "s"} until Christmas`);
 }
+function hero(sub) {
+  return el("section", { class: "hero" },
+    el("span", { class: "santa", "aria-hidden": "true" }, "🎅"),
+    el("h1", {}, "Text Santa!"),
+    sub ? el("p", { class: "muted" }, sub) : null,
+    countdown());
+}
 
-function homeView() {
+function welcomeView() {
   render(
-    el("section", { class: "hero" },
-      el("span", { class: "santa", "aria-hidden": "true" }, "🎅"),
-      el("h1", {}, "Text Santa!"),
-      el("p", { class: "muted" }, "Tell Santa what you want for Christmas."),
-      countdown(),
-    ),
-    el("div", { class: "card" },
-      el("h2", {}, "Who's texting Santa?"),
-      el("div", { class: "grid" },
-        state.children.map((c, i) =>
-          el("a", { class: "pick", href: `#/kid/${c.id}` }, el("span", { class: "emoji" }, ["🧒", "👧", "👦", "🧑", "👶"][i % 5]), c.name)),
-        el("a", { class: "pick", href: "#/parent" }, el("span", { class: "emoji" }, "🧑‍🎄"), "Grown-up"),
-      ),
-    ),
-    el("p", { class: "center muted small" },
-      state.ai ? "Santa's replies are powered by Claude." : "Santa is in offline mode (no API key set) — he still replies!"),
+    hero("Kids text Santa their Christmas wishes. Grown-ups privately tell Santa who's been naughty or nice."),
+    el("div", { class: "card center" },
+      el("h2", {}, "Grown-ups, start here"),
+      el("p", { class: "muted" }, "Create a free family account, add your kids, and hand them the phone."),
+      el("p", { class: "row", style: "justify-content:center" },
+        el("a", { class: "btn", href: "#/signup" }, "Create family account"),
+        el("a", { class: "btn secondary", href: "#/signin" }, "Sign in"))),
   );
 }
 
-function setupView() {
-  if (state.setup) return go("#/");
+function signupView() {
   const kidsBox = el("div");
   const addKidRow = () =>
     kidsBox.append(
       el("div", { class: "row", style: "margin-bottom:8px" },
-        el("input", { placeholder: "Child's first name", name: "kname", "aria-label": "Child's first name" }),
+        el("input", { placeholder: "Child's first name", name: "kname", "aria-label": "Child's first name", maxlength: 40 }),
         el("input", { placeholder: "Age", name: "kage", type: "number", min: 1, max: 17, style: "max-width:90px", "aria-label": "Age" }),
-        el("input", { placeholder: "Phone (optional, for SMS)", name: "kphone", type: "tel", "aria-label": "Child phone" }),
       ),
     );
   addKidRow();
@@ -98,14 +99,16 @@ function setupView() {
     async onsubmit(e) {
       e.preventDefault();
       const f = new FormData(form);
-      const names = f.getAll("kname"), ages = f.getAll("kage"), phones = f.getAll("kphone");
-      const children = names.map((name, i) => ({ name, age: ages[i], phone: phones[i] })).filter((c) => c.name.trim());
-      if (f.get("pin") !== f.get("pin2")) return (err.textContent = "PINs don't match.");
+      const names = f.getAll("kname"), ages = f.getAll("kage");
+      const children = names.map((name, i) => ({ name, age: ages[i] })).filter((c) => c.name.trim());
+      if (f.get("pin") !== f.get("pin2")) return (err.textContent = "The two PINs don't match. Type them again.");
       try {
-        await api("POST", "/api/setup", {
+        await api("POST", "/api/signup", {
+          familyName: f.get("familyName"),
+          email: f.get("email"),
+          password: f.get("password"),
           pin: f.get("pin"),
           children,
-          parentPhones: String(f.get("pphones") || "").split(",").map((s) => s.trim()).filter(Boolean),
         });
         go("#/parent");
       } catch (e2) {
@@ -113,33 +116,80 @@ function setupView() {
       }
     },
   },
-    el("h2", {}, "Welcome to the North Pole! 🎄"),
-    el("p", { class: "muted" }, "Grown-ups: set up your family. Your PIN keeps naughty-or-nice reports and the dashboard private from the kids."),
+    el("h2", {}, "Create your family account 🎄"),
+    el("label", { for: "familyName" }, "Family name"),
+    el("input", { id: "familyName", name: "familyName", placeholder: "The Garcia Family", maxlength: 60 }),
+    el("label", { for: "email" }, "Grown-up's email (used to sign in)"),
+    el("input", { id: "email", name: "email", type: "email", autocomplete: "email", required: true }),
+    el("label", { for: "password" }, "Password (8+ characters)"),
+    el("input", { id: "password", name: "password", type: "password", autocomplete: "new-password", minlength: 8, required: true }),
     el("label", {}, "Your children"),
     kidsBox,
     el("button", { type: "button", class: "secondary", onclick: addKidRow }, "+ Add another child"),
+    el("p", { class: "muted small", style: "margin-top:14px" }, "Your PIN unlocks Santa's Book (wish lists and naughty-or-nice reports) so the kids can't peek."),
     el("div", { class: "row" },
       el("div", {}, el("label", { for: "pin" }, "Grown-up PIN (4-8 digits)"), el("input", { id: "pin", name: "pin", type: "password", inputmode: "numeric", pattern: "\\d{4,8}", required: true })),
-      el("div", {}, el("label", { for: "pin2" }, "Confirm PIN"), el("input", { id: "pin2", name: "pin2", type: "password", inputmode: "numeric", pattern: "\\d{4,8}", required: true })),
+      el("div", {}, el("label", { for: "pin2" }, "Type the PIN again"), el("input", { id: "pin2", name: "pin2", type: "password", inputmode: "numeric", pattern: "\\d{4,8}", required: true })),
     ),
-    el("label", { for: "pphones" }, "Grown-up phone numbers (optional, comma separated, for real SMS)"),
-    el("input", { id: "pphones", name: "pphones", type: "tel", placeholder: "+15551234567" }),
     err,
-    el("button", { type: "submit" }, "Start texting Santa 🎅"),
+    el("p", { class: "row" }, el("button", { type: "submit", class: "shrink" }, "Create account 🎅"), el("a", { href: "#/signin", class: "shrink muted" }, "I already have one")),
   );
-  render(el("section", { class: "hero" }, el("span", { class: "santa" }, "🎅"), el("h1", {}, "Text Santa")), form);
+  render(el("p", {}, el("a", { href: "#/", class: "btn secondary" }, "← Back")), form);
 }
 
-function loginView(next) {
+function signinView() {
   const err = el("p", { class: "error" });
-  const input = el("input", { type: "password", inputmode: "numeric", autocomplete: "current-password", placeholder: "PIN", "aria-label": "PIN", required: true });
+  const form = el("form", {
+    class: "card",
+    async onsubmit(e) {
+      e.preventDefault();
+      const f = new FormData(form);
+      try {
+        await api("POST", "/api/login", { email: f.get("email"), password: f.get("password") });
+        go("#/");
+        route();
+      } catch (e2) {
+        err.textContent = e2.message;
+      }
+    },
+  },
+    el("h2", {}, "Sign in"),
+    el("p", { class: "muted" }, "This device stays signed in, so the kids can text Santa any time."),
+    el("label", { for: "email" }, "Email"),
+    el("input", { id: "email", name: "email", type: "email", autocomplete: "email", required: true }),
+    el("label", { for: "password" }, "Password"),
+    el("input", { id: "password", name: "password", type: "password", autocomplete: "current-password", required: true }),
+    err,
+    el("p", { class: "row" }, el("button", { type: "submit", class: "shrink" }, "Sign in"), el("a", { href: "#/signup", class: "shrink muted" }, "Create a family account")),
+  );
+  render(el("p", {}, el("a", { href: "#/", class: "btn secondary" }, "← Back")), form);
+}
+
+function homeView() {
+  render(
+    hero(`Tell Santa what you want for Christmas!`),
+    el("div", { class: "card" },
+      el("h2", {}, "Who's texting Santa?"),
+      el("div", { class: "grid" },
+        state.children.map((c, i) =>
+          el("a", { class: "pick", href: `#/kid/${c.id}` }, el("span", { class: "emoji" }, ["🧒", "👧", "👦", "🧑", "👶"][i % 5]), c.name)),
+        el("a", { class: "pick", href: "#/parent" }, el("span", { class: "emoji" }, "🧑‍🎄"), "Grown-up"),
+      ),
+    ),
+    el("p", { class: "center muted small" }, state.familyName ? `${state.familyName} · ` : "", "Santa replies right away, any time of day."),
+  );
+}
+
+function pinView(next) {
+  const err = el("p", { class: "error" });
+  const input = el("input", { type: "password", inputmode: "numeric", autocomplete: "off", placeholder: "PIN", "aria-label": "PIN", required: true });
   const form = el("form", {
     class: "card",
     async onsubmit(e) {
       e.preventDefault();
       try {
-        await api("POST", "/api/parent/login", { pin: input.value });
-        route();
+        await api("POST", "/api/unlock", { pin: input.value });
+        location.hash === next ? route() : go(next);
       } catch (e2) {
         err.textContent = e2.message;
         input.value = "";
@@ -147,8 +197,8 @@ function loginView(next) {
     },
   },
     el("h2", {}, "🔒 Grown-ups only"),
-    el("p", { class: "muted" }, "Enter your PIN to report naughty or nice and see wish lists."),
-    el("div", { class: "row" }, input, el("button", { class: "shrink", type: "submit" }, "Enter")),
+    el("p", { class: "muted" }, "Enter your PIN to open Santa's Book."),
+    el("div", { class: "row" }, input, el("button", { class: "shrink", type: "submit" }, "Open")),
     err,
   );
   render(el("p", {}, el("a", { href: "#/", class: "btn secondary" }, "← Back")), form);
@@ -261,7 +311,7 @@ async function dashboardView() {
       el("h1", {}, "📖 Santa's Book"),
       el("span", { class: "spacer" }),
       el("a", { href: "#/parent/chat", class: "btn green" }, "💬 Text Santa"),
-      el("button", { class: "secondary", onclick: async () => (await api("POST", "/api/parent/logout"), go("#/")) }, "Lock"),
+      el("button", { class: "secondary", onclick: async () => (await api("POST", "/api/lock"), go("#/")) }, "Lock"),
     ),
     countdown(),
     tabs,
@@ -324,57 +374,92 @@ function kidPanel(child, refresh) {
 }
 
 function settingsPanel(data, refresh) {
-  const msg = el("p", { class: "error" });
+  const msg = el("p", { class: "error", role: "status" });
+  const say = (t) => { msg.textContent = t; msg.scrollIntoView({ block: "nearest" }); };
+
   const addForm = el("form", {
     class: "card",
     async onsubmit(e) {
       e.preventDefault();
       const f = new FormData(addForm);
       try {
-        const kid = await api("POST", "/api/parent/children", { name: f.get("name"), age: f.get("age"), phone: f.get("phone") });
+        const kid = await api("POST", "/api/parent/children", { name: f.get("name"), age: f.get("age") });
         dashTab = kid.id;
         refresh();
-      } catch (e2) { msg.textContent = e2.message; }
+      } catch (e2) { say(e2.message); }
     },
   },
     el("h3", {}, "Add a child"),
     el("div", { class: "row" },
-      el("input", { name: "name", placeholder: "First name", required: true, "aria-label": "First name" }),
+      el("input", { name: "name", placeholder: "First name", required: true, "aria-label": "First name", maxlength: 40 }),
       el("input", { name: "age", type: "number", min: 1, max: 17, placeholder: "Age", style: "max-width:90px", "aria-label": "Age" }),
-      el("input", { name: "phone", type: "tel", placeholder: "Phone (optional)", "aria-label": "Phone" }),
       el("button", { class: "shrink", type: "submit" }, "Add"),
     ),
   );
 
-  const phonesForm = el("form", {
+  const accountForm = el("form", {
     class: "card",
     async onsubmit(e) {
       e.preventDefault();
-      const f = new FormData(phonesForm);
-      const childPhones = Object.fromEntries(data.children.map((c) => [c.id, f.get(`phone-${c.id}`)]));
-      const body = { parentPhones: String(f.get("parents")).split(",").map((s) => s.trim()).filter(Boolean), childPhones };
-      if (f.get("pin")) body.pin = f.get("pin");
-      try { await api("PUT", "/api/parent/settings", body); msg.textContent = "Saved! ✅"; setTimeout(refresh, 600); }
-      catch (e2) { msg.textContent = e2.message; }
+      const f = new FormData(accountForm);
+      const body = { familyName: f.get("familyName"), pin: f.get("pin") };
+      if (f.get("password")) Object.assign(body, { password: f.get("password"), currentPassword: f.get("currentPassword") });
+      if (data.smsEnabled) {
+        body.parentPhones = String(f.get("parents") || "").split(",").map((s) => s.trim()).filter(Boolean);
+        body.childPhones = Object.fromEntries(data.children.map((c) => [c.id, f.get(`phone-${c.id}`)]));
+      }
+      try { await api("PUT", "/api/parent/settings", body); say("Saved ✅"); accountForm.querySelectorAll("input[type=password]").forEach((i) => (i.value = "")); }
+      catch (e2) { say(e2.message); }
     },
   },
-    el("h3", {}, "📱 Real text messages (SMS)"),
-    el("p", { class: "muted small" },
-      "Optional: connect a Twilio phone number so your family can text Santa from real phones. Set the number's incoming-message webhook to ",
-      el("code", {}, data.smsWebhook || `${location.origin}/sms`), ". Texts from a grown-up's number go to the private grown-ups line; texts from a child's number go to that child's chat."),
-    el("label", {}, "Grown-up numbers (comma separated)"),
-    el("input", { name: "parents", type: "tel", value: data.parentPhones.join(", ") }),
-    data.children.map((c) => [el("label", {}, `${c.name}'s number`), el("input", { name: `phone-${c.id}`, type: "tel", value: c.phone || "" })]),
-    el("h3", { style: "margin-top:16px" }, "🔒 Change PIN"),
-    el("input", { name: "pin", type: "password", inputmode: "numeric", pattern: "\\d{4,8}", placeholder: "New PIN (leave blank to keep)" }),
+    el("h3", {}, "Family settings"),
+    el("p", { class: "muted small" }, `Signed in as ${data.email}`),
+    el("label", { for: "s-family" }, "Family name"),
+    el("input", { id: "s-family", name: "familyName", value: data.familyName, maxlength: 60 }),
+    el("label", { for: "s-pin" }, "New PIN (leave blank to keep)"),
+    el("input", { id: "s-pin", name: "pin", type: "password", inputmode: "numeric", pattern: "\\d{4,8}", autocomplete: "off" }),
+    el("label", { for: "s-cur" }, "Change password: current password"),
+    el("input", { id: "s-cur", name: "currentPassword", type: "password", autocomplete: "current-password" }),
+    el("label", { for: "s-new" }, "New password"),
+    el("input", { id: "s-new", name: "password", type: "password", autocomplete: "new-password", minlength: 8 }),
+    data.smsEnabled ? [
+      el("h3", { style: "margin-top:16px" }, "📱 Text Santa from real phones"),
+      el("p", { class: "muted small" }, data.smsNumber ? `Santa's phone number is ${data.smsNumber}. ` : "", "Add your family's phone numbers. Texts from a grown-up's number go to the private grown-ups line; texts from a child's number go to that child's chat."),
+      el("label", { for: "s-parents" }, "Grown-up numbers (comma separated)"),
+      el("input", { id: "s-parents", name: "parents", type: "tel", value: data.parentPhones.join(", ") }),
+      data.children.map((c) => [el("label", { for: `s-ph-${c.id}` }, `${c.name}'s number`), el("input", { id: `s-ph-${c.id}`, name: `phone-${c.id}`, type: "tel", value: c.phone || "" })]),
+    ] : null,
     el("p", {}, el("button", { type: "submit" }, "Save settings")),
   );
 
   const removeCard = el("div", { class: "card" },
     el("h3", {}, "Remove a child"),
-    el("ul", { class: "list" }, data.children.map((c) =>
-      el("li", {}, el("span", { class: "txt" }, c.name),
-        el("button", { class: "secondary", onclick: async () => { if (confirm(`Remove ${c.name} and their wish list?`)) { await api("DELETE", `/api/parent/children/${c.id}`); refresh(); } } }, "Remove")))),
+    el("ul", { class: "list" }, data.children.map((c) => {
+      const li = el("li", {}, el("span", { class: "txt" }, c.name));
+      const btn = el("button", { class: "secondary", onclick: () => {
+        btn.replaceWith(el("span", { class: "row shrink" },
+          el("span", { class: "small" }, "Remove their wishes and chat too?"),
+          el("button", { class: "shrink", onclick: async () => { await api("DELETE", `/api/parent/children/${c.id}`); refresh(); } }, "Yes, remove"),
+          el("button", { class: "shrink secondary", onclick: refresh }, "Cancel")));
+      } }, "Remove");
+      li.append(btn);
+      return li;
+    })),
   );
-  return el("div", {}, msg, addForm, phonesForm, data.children.length ? removeCard : null);
+
+  const delPw = el("input", { type: "password", placeholder: "Your password", "aria-label": "Password to confirm", autocomplete: "current-password" });
+  const dangerCard = el("div", { class: "card" },
+    el("h3", {}, "This device"),
+    el("p", { class: "row" },
+      el("button", { class: "secondary shrink", onclick: async () => { await api("POST", "/api/logout"); go("#/"); route(); } }, "Sign out of this device")),
+    el("details", {},
+      el("summary", {}, "Delete family account"),
+      el("p", { class: "muted small" }, "This permanently deletes your children, wish lists, reports and chats."),
+      el("div", { class: "row" }, delPw,
+        el("button", { class: "shrink", onclick: async () => {
+          try { await api("DELETE", "/api/parent/account", { password: delPw.value }); go("#/"); route(); }
+          catch (e2) { say(e2.message); }
+        } }, "Delete everything"))),
+  );
+  return el("div", {}, msg, addForm, accountForm, data.children.length ? removeCard : null, dangerCard);
 }
