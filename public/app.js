@@ -225,12 +225,80 @@ function speak(text) {
   } catch {}
 }
 
+// ---------- Santa voice memos ----------
+// One shared <audio> element: once it has played during a tap, phones allow it to play again later.
+const player = new Audio();
+player.preload = "auto";
+let audioUnlocked = false;
+function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+  // 0.05s of silence as a WAV, played during the first tap so later memos can autoplay.
+  const n = 400, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVEfmt "); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 8000, true); v.setUint32(28, 16000, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, n * 2, true);
+  player.src = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  player.play().catch(() => {});
+}
+let currentMemo = null;
+function stopMemo() {
+  player.pause();
+  if (currentMemo) currentMemo.classList.remove("playing");
+  currentMemo = null;
+}
+player.addEventListener("ended", stopMemo);
+player.addEventListener("timeupdate", () => {
+  if (!currentMemo || !player.duration) return;
+  currentMemo.style.setProperty("--progress", `${(player.currentTime / player.duration) * 100}%`);
+  currentMemo.querySelector(".memo-time").textContent = fmtTime(player.duration - player.currentTime);
+});
+const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+
+async function playMemo(memoEl, url, text) {
+  if (currentMemo === memoEl) return stopMemo();
+  stopMemo();
+  try { speechSynthesis.cancel(); } catch {}
+  currentMemo = memoEl;
+  memoEl.classList.add("playing", "loading");
+  player.src = url;
+  try {
+    await player.play();
+  } catch {
+    // Memo unavailable (Santa's voice is resting, or no connection): use the phone's voice.
+    if (currentMemo === memoEl) stopMemo();
+    speak(text);
+  } finally {
+    memoEl.classList.remove("loading");
+  }
+}
+player.addEventListener("loadedmetadata", () => {
+  if (currentMemo && player.duration && isFinite(player.duration)) currentMemo.querySelector(".memo-time").textContent = fmtTime(player.duration);
+});
+
+function memoBubble(url, text) {
+  const bars = el("span", { class: "memo-wave", "aria-hidden": "true" },
+    Array.from({ length: 22 }, (_, i) => el("i", { style: `height:${30 + Math.round(Math.abs(Math.sin(i * 1.7 + text.length)) * 70)}%` })));
+  const memo = el("button", { type: "button", class: "memo", "aria-label": "Play Santa's voice memo" },
+    el("span", { class: "memo-play", "aria-hidden": "true" }), bars, el("span", { class: "memo-time" }, "🎅"));
+  memo.addEventListener("click", (e) => { e.stopPropagation(); playMemo(memo, url, text); });
+  return el("div", { class: "bubble santa memo-bubble" }, memo, el("div", { class: "memo-text" }, text));
+}
+
 // ---------- chat ----------
-function chatShell({ title, subtitle, back, messages, placeholder, chips = [], onSend, extraHeader, voice = false }) {
+function chatShell({ title, subtitle, back, messages, placeholder, chips = [], onSend, extraHeader, voice = false, memoUrl = null }) {
   let readAloud = voice && canSpeak && store.get("santa_read_aloud") === "1";
   const list = el("div", { class: "messages", role: "log" });
-  const add = (from, text, { fresh = false } = {}) => {
+  const add = (from, text, { fresh = false, id = null } = {}) => {
     const isSanta = from === "santa";
+    if (isSanta && memoUrl && id) {
+      const bubble = memoBubble(memoUrl(id), text);
+      list.append(bubble);
+      list.scrollTop = list.scrollHeight;
+      if (fresh && readAloud) playMemo(bubble.querySelector(".memo"), memoUrl(id), text);
+      return;
+    }
     const bubble = el("div", { class: `bubble ${isSanta ? "santa" : from === "note" ? "note" : "me"}` }, text);
     if (isSanta && voice && canSpeak) {
       bubble.classList.add("speakable");
@@ -241,7 +309,7 @@ function chatShell({ title, subtitle, back, messages, placeholder, chips = [], o
     list.scrollTop = list.scrollHeight;
     if (isSanta && fresh && readAloud) speak(text);
   };
-  messages.forEach((m) => add(m.from, m.text));
+  messages.forEach((m) => add(m.from, m.text, { id: m.id }));
   const input = el("input", { placeholder, "aria-label": "Message", autocomplete: "off", maxlength: 1000 });
   const sendBtn = el("button", { type: "submit", "aria-label": "Send" }, "Send");
   let busy = false;
@@ -257,7 +325,7 @@ function chatShell({ title, subtitle, back, messages, placeholder, chips = [], o
     list.append(typing);
     list.scrollTop = list.scrollHeight;
     try {
-      await onSend(text, (from, t) => add(from, t, { fresh: true }));
+      await onSend(text, (from, t, id) => add(from, t, { fresh: true, id }));
     } catch (e) {
       add("note", e.message);
     } finally {
@@ -277,6 +345,7 @@ function chatShell({ title, subtitle, back, messages, placeholder, chips = [], o
     micBtn = el("button", {
       type: "button", class: "mic", "aria-label": "Talk to Santa", title: "Tap and talk",
       onclick() {
+        unlockAudio();
         if (rec) return stop();
         if (canSpeak) try { speechSynthesis.cancel(); } catch {}
         rec = new SpeechRec();
@@ -332,11 +401,12 @@ function chatShell({ title, subtitle, back, messages, placeholder, chips = [], o
     speakerBtn = el("button", {
       type: "button", class: "secondary speaker",
       onclick() {
+        unlockAudio();
         readAloud = !readAloud;
         store.set("santa_read_aloud", readAloud ? "1" : "0");
         paint();
-        if (readAloud) speak("Ho ho ho! I'll read my messages out loud for you!");
-        else try { speechSynthesis.cancel(); } catch {}
+        if (readAloud) { if (!memoUrl) speak("Ho ho ho! I'll read my messages out loud for you!"); }
+        else { stopMemo(); try { speechSynthesis.cancel(); } catch {} }
       },
     });
     paint();
@@ -355,8 +425,9 @@ function chatShell({ title, subtitle, back, messages, placeholder, chips = [], o
     micBtn ? el("p", { class: "mic-hint" }, "Tap 🎤 and talk to Santa!") : null,
     el("form", { class: "composer", onsubmit: (e) => (e.preventDefault(), send(input.value)) }, micBtn, input, sendBtn),
   );
+  phone.addEventListener("pointerdown", unlockAudio, { once: true });
   render(phone);
-  window.addEventListener("hashchange", () => { try { speechSynthesis.cancel(); } catch {} }, { once: true });
+  window.addEventListener("hashchange", () => { stopMemo(); try { speechSynthesis.cancel(); } catch {} }, { once: true });
   if (!voice) input.focus();
 }
 
@@ -371,10 +442,11 @@ async function kidChatView(id) {
     placeholder: `Text Santa, ${child.name}…`,
     chips: ["Hi Santa! 👋", "For Christmas I want…", "I was nice today!", "How are the reindeer? 🦌"],
     voice: true,
+    memoUrl: state.voiceMemos ? (mid) => `/api/kid/${id}/memo/${mid}` : null,
     async onSend(text, add) {
       if (text.endsWith("…")) return add("note", "Finish your message in the box below! ✏️");
-      const { reply } = await api("POST", `/api/kid/${id}/messages`, { text });
-      add("santa", reply);
+      const { reply, id: mid } = await api("POST", `/api/kid/${id}/messages`, { text });
+      add("santa", reply, mid);
     },
   });
 }

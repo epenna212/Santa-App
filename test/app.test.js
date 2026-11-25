@@ -182,3 +182,36 @@ test("SMS webhook routes by phone number and checks Twilio signature", async () 
     server.close();
   }
 });
+
+test("voice memos are made once, cached, capped and private to the family", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "memos-"));
+  let calls = 0;
+  const tts = async (text) => { calls++; return Buffer.from(`ID3 fake mp3 for: ${text}`); };
+  const { server, base } = await boot({ tts, memoDir: dir, dailyMemos: 2 });
+  try {
+    const call = client(base);
+    await signup(call);
+    const kid = (await call("GET", "/api/state")).body.children[0];
+    assert.equal((await call("GET", "/api/state")).body.voiceMemos, true);
+    const r1 = await call("POST", `/api/kid/${kid.id}/messages`, { text: "Hi Santa! 🎅" });
+    assert.ok(r1.body.id, "reply has a message id");
+
+    const res = await call("GET", `/api/kid/${kid.id}/memo/${r1.body.id}`);
+    assert.equal(res.status, 200);
+    assert.match(res.body, /fake mp3 for: /);
+    assert.doesNotMatch(res.body, /🎅/, "emoji are stripped before speaking");
+    await call("GET", `/api/kid/${kid.id}/memo/${r1.body.id}`);
+    assert.equal(calls, 1, "second play comes from disk");
+
+    const r2 = await call("POST", `/api/kid/${kid.id}/messages`, { text: "hello" });
+    const r3 = await call("POST", `/api/kid/${kid.id}/messages`, { text: "hello again" });
+    assert.equal((await call("GET", `/api/kid/${kid.id}/memo/${r2.body.id}`)).status, 200);
+    assert.equal((await call("GET", `/api/kid/${kid.id}/memo/${r3.body.id}`)).status, 429, "daily cap");
+
+    const other = client(base);
+    await signup(other, { email: "other@example.com" });
+    assert.equal((await other("GET", `/api/kid/${kid.id}/memo/${r1.body.id}`)).status, 404, "other families can't hear it");
+  } finally {
+    server.close();
+  }
+});
