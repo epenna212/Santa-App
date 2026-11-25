@@ -119,6 +119,11 @@ label { display: block; font-weight: 600; margin: 10px 0 4px; }
 .memo-wave i { flex: 1; background: var(--text); border-radius: 2px; min-width: 2px; }
 .memo-time { flex: 0 0 auto; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 32px; text-align: right; }
 .memo-text { font-size: 14px; color: var(--muted); }
+.faceid { background: var(--text); color: var(--bg); font-size: 17px; padding: 12px 22px; }
+.faceid:hover { background: var(--text); filter: brightness(1.2); }
+.banner { border-color: var(--green); }
+.banner p { margin: 0 0 10px; }
+.banner-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 10px 10px; }
 .chip { background: var(--bg); border: 1px solid var(--line); color: var(--text); font-weight: 500; font-size: 14px; padding: 6px 12px; }
 .chip:hover { background: var(--line); }

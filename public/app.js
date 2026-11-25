@@ -29,12 +29,41 @@ async function api(method, url, body) {
 }
 const go = (hash) => (location.hash = hash);
 const when = (iso) => new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-const render = (...nodes) => app.replaceChildren(...nodes);
+const render = (...nodes) => app.replaceChildren(...nodes.filter((n) => n != null && n !== false));
 
 let state = null;
 async function loadState() {
   state = await api("GET", "/api/state");
   return state;
+}
+
+// ---------- Face ID (passkeys) ----------
+const WA = window.SimpleWebAuthnBrowser;
+const faceIdSupported = Boolean(WA && WA.browserSupportsWebAuthn && WA.browserSupportsWebAuthn());
+const ua = navigator.userAgent;
+const bioName = /iPhone|iPad|iPod/.test(ua) ? "Face ID" : /Macintosh/.test(ua) ? "Touch ID" : "fingerprint or face unlock";
+const deviceLabel = () =>
+  /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Macintosh/.test(ua) ? "Mac" : /Android/.test(ua) ? "Android phone" : /Windows/.test(ua) ? "Windows computer" : "This device";
+function faceIdError(e) {
+  if (e && (e.name === "NotAllowedError" || e.name === "AbortError")) return `${bioName} was cancelled. Try again whenever you're ready.`;
+  if (e && e.name === "InvalidStateError") return `${bioName} is already set up on this device.`;
+  return (e && e.message) || `${bioName} didn't work. Please try again.`;
+}
+async function faceIdSignIn() {
+  const { options, flow } = await api("POST", "/api/passkey/auth/options");
+  const response = await WA.startAuthentication({ optionsJSON: options });
+  await api("POST", "/api/passkey/auth/verify", { flow, response });
+}
+async function faceIdSetup() {
+  const { options, flow } = await api("POST", "/api/passkey/register/options");
+  const response = await WA.startRegistration({ optionsJSON: options });
+  await api("POST", "/api/passkey/register/verify", { flow, response, label: deviceLabel() });
+}
+function faceIdButton(text, onDone, err) {
+  return el("button", { type: "button", class: "faceid", async onclick() {
+    err.textContent = "";
+    try { await faceIdSignIn(); onDone(); } catch (e) { err.textContent = faceIdError(e); }
+  } }, "🔐 ", text);
 }
 
 // ---------- router ----------
@@ -45,6 +74,7 @@ async function route() {
     if (!state.signedIn) {
       if (page === "signup") return signupView();
       if (page === "signin") return signinView();
+      if (page === "forgot") return forgotView();
       return welcomeView();
     }
     if (page === "kid" && id) return kidChatView(id);
@@ -160,9 +190,51 @@ function signinView() {
     el("label", { for: "password" }, "Password"),
     el("input", { id: "password", name: "password", type: "password", autocomplete: "current-password", required: true }),
     err,
-    el("p", { class: "row" }, el("button", { type: "submit", class: "shrink" }, "Sign in"), el("a", { href: "#/signup", class: "shrink muted" }, "Create a family account")),
+    el("p", { class: "row" }, el("button", { type: "submit", class: "shrink" }, "Sign in"), el("a", { href: "#/forgot", class: "shrink muted" }, "Forgot password?")),
+    el("p", { class: "muted small" }, "New here? ", el("a", { href: "#/signup" }, "Create a family account")),
   );
-  render(el("p", {}, el("a", { href: "#/", class: "btn secondary" }, "← Back")), form);
+  const faceCard = faceIdSupported
+    ? el("div", { class: "card center" },
+        faceIdButton(`Sign in with ${bioName}`, () => { go("#/"); route(); }, err),
+        el("p", { class: "muted small" }, `Works once you've turned on ${bioName} in Santa's Book → Settings.`))
+    : null;
+  render(el("p", {}, el("a", { href: "#/", class: "btn secondary" }, "← Back")), faceCard, form);
+}
+
+function forgotView() {
+  const err = el("p", { class: "error" });
+  const form = el("form", {
+    class: "card",
+    async onsubmit(e) {
+      e.preventDefault();
+      const f = new FormData(form);
+      if (f.get("password") !== f.get("password2")) return (err.textContent = "The two new passwords don't match.");
+      try {
+        await api("POST", "/api/reset-password", { email: f.get("email"), pin: f.get("pin"), password: f.get("password") });
+        go("#/parent");
+      } catch (e2) {
+        err.textContent = e2.message;
+      }
+    },
+  },
+    el("h2", {}, "Reset your password"),
+    el("p", { class: "muted" }, "Enter your account email and your grown-up PIN (the one that opens Santa's Book), then choose a new password."),
+    el("label", { for: "f-email" }, "Email"),
+    el("input", { id: "f-email", name: "email", type: "email", autocomplete: "email", required: true }),
+    el("label", { for: "f-pin" }, "Grown-up PIN"),
+    el("input", { id: "f-pin", name: "pin", type: "password", inputmode: "numeric", autocomplete: "off", required: true }),
+    el("label", { for: "f-pw" }, "New password (8+ characters)"),
+    el("input", { id: "f-pw", name: "password", type: "password", autocomplete: "new-password", minlength: 8, required: true }),
+    el("label", { for: "f-pw2" }, "Type the new password again"),
+    el("input", { id: "f-pw2", name: "password2", type: "password", autocomplete: "new-password", minlength: 8, required: true }),
+    err,
+    el("p", { class: "row" }, el("button", { type: "submit", class: "shrink" }, "Reset password")),
+    el("p", { class: "muted small" }, "This signs out your other devices. Forgot your PIN too? If you turned on ", bioName, ", use \"Sign in with ", bioName, "\" and change both in Settings."),
+  );
+  const faceCard = faceIdSupported
+    ? el("div", { class: "card center" }, faceIdButton(`Sign in with ${bioName} instead`, () => { go("#/"); route(); }, err))
+    : null;
+  render(el("p", {}, el("a", { href: "#/signin", class: "btn secondary" }, "← Back")), faceCard, form);
 }
 
 function homeView() {
@@ -199,6 +271,7 @@ function pinView(next) {
     el("h2", {}, "🔒 Grown-ups only"),
     el("p", { class: "muted" }, "Enter your PIN to open Santa's Book."),
     el("div", { class: "row" }, input, el("button", { class: "shrink", type: "submit" }, "Open")),
+    faceIdSupported && state.hasPasskey ? el("div", { class: "center" }, faceIdButton(`Unlock with ${bioName}`, () => { location.hash === next ? route() : go(next); }, err)) : null,
     err,
   );
   render(el("p", {}, el("a", { href: "#/", class: "btn secondary" }, "← Back")), form);
@@ -495,6 +568,7 @@ async function dashboardView() {
       el("button", { class: "secondary", onclick: async () => (await api("POST", "/api/lock"), go("#/")) }, "Lock"),
     ),
     countdown(),
+    faceIdSupported && !data.passkeys.length && !faceBannerDismissed ? faceIdBanner(refresh) : null,
     tabs,
     body,
   );
@@ -570,6 +644,37 @@ function shopLinks(item) {
   return el("div", { class: "shop", "aria-label": `Shop for ${item}` },
     el("span", { class: "shop-label" }, "🛒 Shop:"),
     STORES.map((s) => el("a", { href: s.url(q), target: "_blank", rel: "noopener noreferrer" }, s.name)));
+}
+
+let faceBannerDismissed = false;
+function faceIdBanner(refresh) {
+  const err = el("p", { class: "error" });
+  return el("div", { class: "card banner" },
+    el("p", {}, `🔐 Turn on ${bioName} so you can sign in and open Santa's Book without typing your password or PIN.`),
+    el("div", { class: "banner-actions" },
+      el("button", { class: "shrink green", async onclick() {
+        try { await faceIdSetup(); refresh(); } catch (e) { err.textContent = faceIdError(e); }
+      } }, `Turn on ${bioName}`),
+      el("button", { class: "shrink ghost", "aria-label": "Not now", onclick() { faceBannerDismissed = true; refresh(); } }, "Not now")),
+    err);
+}
+
+function faceIdCard(data, refresh) {
+  const err = el("p", { class: "error" });
+  return el("div", { class: "card" },
+    el("h3", {}, `🔐 ${bioName} sign-in`),
+    el("p", { class: "muted small" }, `Sign in and open Santa's Book with ${bioName} instead of your password and PIN. Only faces or fingerprints saved on your device can unlock it.`),
+    data.passkeys.length
+      ? el("ul", { class: "list" }, data.passkeys.map((p) =>
+          el("li", {}, el("span", { class: "txt" }, p.label), el("time", {}, `added ${when(p.createdAt)}`),
+            el("button", { class: "ghost", "aria-label": `Remove ${p.label}`, async onclick() { await api("DELETE", `/api/parent/passkeys/${encodeURIComponent(p.id)}`); refresh(); } }, "✕"))))
+      : el("p", {}, "Not turned on yet."),
+    faceIdSupported
+      ? el("p", {}, el("button", { class: "green", async onclick() {
+          try { await faceIdSetup(); refresh(); } catch (e) { err.textContent = faceIdError(e); }
+        } }, `Turn on ${bioName} for this device`))
+      : el("p", { class: "muted small" }, "This browser doesn't support Face ID sign-in."),
+    err);
 }
 
 function settingsPanel(data, refresh) {
@@ -660,5 +765,5 @@ function settingsPanel(data, refresh) {
           catch (e2) { say(e2.message); }
         } }, "Delete everything"))),
   );
-  return el("div", {}, msg, addForm, accountForm, data.children.length ? removeCard : null, dangerCard);
+  return el("div", {}, msg, faceIdCard(data, refresh), addForm, accountForm, data.children.length ? removeCard : null, dangerCard);
 }

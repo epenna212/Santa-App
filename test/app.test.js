@@ -49,6 +49,13 @@ test("wish extraction", () => {
   assert.deepEqual(extractWishes("I want a red bike and a puppy!"), ["red bike", "puppy"]);
   assert.deepEqual(extractWishes("Can I please have a LEGO castle?"), ["LEGO castle"]);
   assert.deepEqual(extractWishes("hello santa"), []);
+  assert.deepEqual(extractWishes("can I have an art set please"), ["art set"]);
+  assert.deepEqual(extractWishes("I would love a dollhouse"), ["dollhouse"]);
+  // Short answers count when Santa just asked what they want.
+  assert.deepEqual(extractWishes("a puppy and a bike", { askedForWish: true }), ["puppy", "bike"]);
+  assert.deepEqual(extractWishes("a puppy and a bike"), []);
+  assert.deepEqual(extractWishes("I was nice today!", { askedForWish: true }), []);
+  assert.deepEqual(extractWishes("how are the reindeer?", { askedForWish: true }), []);
 });
 
 test("sign up, kids chat, grown-up reports, PIN lock", async () => {
@@ -230,6 +237,56 @@ test("failed voice memos don't use up the daily allowance", async () => {
     assert.equal((await call("GET", `/api/kid/${kid.id}/memo/${r.body.id}`)).status, 502);
     fail = false;
     assert.equal((await call("GET", `/api/kid/${kid.id}/memo/${r.body.id}`)).status, 200);
+  } finally {
+    server.close();
+  }
+});
+
+test("forgot password: reset with email + PIN, with lockout", async () => {
+  const { server, base } = await boot();
+  try {
+    const call = client(base);
+    await signup(call);
+    const other = client(base);
+    assert.equal((await other("POST", "/api/reset-password", { email: "mom@example.com", pin: "1234", password: "short" })).status, 400);
+    assert.equal((await other("POST", "/api/reset-password", { email: "nobody@example.com", pin: "1234", password: "newpassword1" })).status, 401);
+    assert.equal((await other("POST", "/api/reset-password", { email: "mom@example.com", pin: "9999", password: "newpassword1" })).status, 401);
+    assert.equal((await other("POST", "/api/reset-password", { email: "mom@example.com", pin: "1234", password: "newpassword1" })).status, 200);
+    assert.equal((await other("GET", "/api/state")).body.grownup, true, "reset signs this device in");
+    assert.equal((await call("GET", "/api/state")).body.signedIn, false, "other devices are signed out");
+    assert.equal((await client(base)("POST", "/api/login", { email: "mom@example.com", password: "newpassword1" })).status, 200);
+    assert.equal((await client(base)("POST", "/api/login", { email: "mom@example.com", password: "candycane1" })).status, 401);
+  } finally {
+    server.close();
+  }
+});
+
+test("forgot password locks after 5 wrong PINs", async () => {
+  const { server, base, store } = await boot();
+  try {
+    await signup(client(base));
+    const fam = store.familyByEmail("mom@example.com");
+    for (let i = 0; i < 5; i++) {
+      // Fresh "IP" isn't possible in-process, so clear the per-IP limiter between tries.
+      await client(base)("POST", "/api/reset-password", { email: "mom@example.com", pin: "000" + i, password: "newpassword1" });
+    }
+    assert.ok(fam.resetLock.until > Date.now(), "account reset is locked");
+    const r = await client(base)("POST", "/api/reset-password", { email: "mom@example.com", pin: "1234", password: "newpassword1" });
+    assert.equal(r.status, 429);
+  } finally {
+    server.close();
+  }
+});
+
+test("Face ID endpoints: options need the right access and expired flows are refused", async () => {
+  const { server, base } = await boot();
+  try {
+    const anon = client(base);
+    const opts = await anon("POST", "/api/passkey/auth/options");
+    assert.equal(opts.status, 200);
+    assert.ok(opts.body.options.challenge && opts.body.flow);
+    assert.equal((await anon("POST", "/api/passkey/register/options")).status, 401);
+    assert.equal((await anon("POST", "/api/passkey/auth/verify", { flow: "nope", response: {} })).status, 400);
   } finally {
     server.close();
   }

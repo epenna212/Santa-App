@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Store, checkSecret, hashSecret, niceScore, verdict, normalizePhone, normalizeEmail } from "./lib/store.js";
 import { replyToKid, replyToParent, aiEnabled, daysUntilChristmas } from "./lib/santa.js";
 import { MemoStore, elevenLabsTts, voiceEnabled } from "./lib/voice.js";
+import { Passkeys } from "./lib/passkeys.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -35,6 +36,8 @@ export function createApp({
   app.use(express.json({ limit: "32kb" }));
   app.use("/sms", express.urlencoded({ extended: false, limit: "32kb" }));
   app.use(express.static(path.join(here, "public")));
+  app.get("/vendor/webauthn.js", (req, res) =>
+    res.type("application/javascript").sendFile(path.join(here, "node_modules/@simplewebauthn/browser/dist/bundle/index.umd.min.js")));
   app.get("/healthz", (req, res) => res.send("ok"));
 
   // Only JSON may change data under /api (blocks cross-site form posts).
@@ -97,6 +100,7 @@ export function createApp({
       familyName: req.family?.name ?? null,
       children: req.family ? req.family.children.map(publicChild) : [],
       grownup: req.grownup,
+      hasPasskey: Boolean(req.family?.passkeys?.length),
       ai: aiEnabled(),
       voiceMemos: Boolean(tts),
       daysUntilChristmas: daysUntilChristmas(),
@@ -130,6 +134,78 @@ export function createApp({
     }
     attempts.delete(key);
     setCookie(req, res, store.createSession(family.id, DEVICE_MS), DEVICE_MS);
+    res.json({ ok: true });
+  });
+
+  // ---------- Face ID (passkeys) ----------
+  const passkeys = new Passkeys(store);
+  const fail = (res, err) => res.status(400).json({ error: err.message || "Face ID didn't work. Please try again." });
+
+  app.post("/api/passkey/register/options", requireGrownup, async (req, res) => {
+    try { res.json(await passkeys.registrationOptions(req, req.family)); } catch (err) { fail(res, err); }
+  });
+  app.post("/api/passkey/register/verify", requireGrownup, async (req, res) => {
+    try {
+      await passkeys.finishRegistration(req, req.family, req.body?.flow, req.body?.response, req.body?.label);
+      res.json({ ok: true });
+    } catch (err) { fail(res, err); }
+  });
+  app.post("/api/passkey/auth/options", async (req, res) => {
+    try { res.json(await passkeys.authenticationOptions(req)); } catch (err) { fail(res, err); }
+  });
+  // Face ID both signs this device in and unlocks Santa's Book.
+  app.post("/api/passkey/auth/verify", async (req, res) => {
+    try {
+      const family = await passkeys.finishAuthentication(req, req.body?.flow, req.body?.response);
+      if (req.family?.id === family.id) {
+        req.sess.grownUntil = Date.now() + GROWNUP_MS;
+        store.save();
+      } else {
+        const t = store.createSession(family.id, DEVICE_MS);
+        store.session(t).grownUntil = Date.now() + GROWNUP_MS;
+        setCookie(req, res, t, DEVICE_MS);
+      }
+      res.json({ ok: true });
+    } catch (err) { fail(res, err); }
+  });
+  app.delete("/api/parent/passkeys/:pid", requireGrownup, (req, res) => {
+    req.family.passkeys = (req.family.passkeys || []).filter((p) => p.id !== req.params.pid);
+    store.save();
+    res.json({ ok: true });
+  });
+
+  // ---------- forgot password (email + grown-up PIN) ----------
+  const RESET_TRIES = 5;
+  const RESET_LOCK_MS = 24 * 60 * 60 * 1000;
+  app.post("/api/reset-password", (req, res) => {
+    const { email, pin, password } = req.body || {};
+    if (String(password || "").length < 8) return res.status(400).json({ error: "New password must be at least 8 characters." });
+    const ipKey = `reset:${req.ip}`;
+    if (tooMany(ipKey)) return res.status(429).json({ error: "Too many tries. Wait 5 minutes and try again." });
+    const family = store.familyByEmail(email);
+    const lock = family?.resetLock;
+    if (lock && lock.until > Date.now()) {
+      return res.status(429).json({ error: "Too many wrong PINs for this account. Try again tomorrow, or sign in with Face ID." });
+    }
+    if (!family || !checkSecret(String(pin || ""), family.pinHash)) {
+      failed(ipKey);
+      if (family) {
+        const expired = family.resetLock?.until && family.resetLock.until <= Date.now();
+        const l = !family.resetLock || expired ? { count: 0, until: 0 } : family.resetLock;
+        l.count += 1;
+        if (l.count >= RESET_TRIES) Object.assign(l, { count: 0, until: Date.now() + RESET_LOCK_MS });
+        family.resetLock = l;
+        store.save();
+      }
+      return res.status(401).json({ error: "That email and PIN don't match." });
+    }
+    family.passwordHash = hashSecret(password);
+    family.resetLock = { count: 0, until: 0 };
+    // Sign out every device, then sign this one in.
+    for (const [k, sess] of Object.entries(store.data.sessions)) if (sess.familyId === family.id) delete store.data.sessions[k];
+    const t = store.createSession(family.id, DEVICE_MS);
+    store.session(t).grownUntil = Date.now() + GROWNUP_MS;
+    setCookie(req, res, t, DEVICE_MS);
     res.json({ ok: true });
   });
 
@@ -169,6 +245,7 @@ export function createApp({
       messages: store.conversation(f, "parent"),
       smsNumber: process.env.SANTA_PHONE_NUMBER || null,
       smsEnabled: Boolean(twilioAuthToken),
+      passkeys: (req.family.passkeys || []).map((p) => ({ id: p.id, label: p.label, createdAt: p.createdAt, lastUsedAt: p.lastUsedAt })),
     });
   });
 
