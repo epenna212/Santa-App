@@ -215,3 +215,22 @@ test("voice memos are made once, cached, capped and private to the family", asyn
     server.close();
   }
 });
+
+test("failed voice memos don't use up the daily allowance", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "memos-"));
+  let fail = true;
+  const tts = async () => { if (fail) throw new Error("bad key"); return Buffer.from("ID3 ok"); };
+  const { server, base } = await boot({ tts, memoDir: dir, dailyMemos: 1 });
+  try {
+    const call = client(base);
+    await signup(call);
+    const kid = (await call("GET", "/api/state")).body.children[0];
+    const r = await call("POST", `/api/kid/${kid.id}/messages`, { text: "hi" });
+    assert.equal((await call("GET", `/api/kid/${kid.id}/memo/${r.body.id}`)).status, 502);
+    assert.equal((await call("GET", `/api/kid/${kid.id}/memo/${r.body.id}`)).status, 502);
+    fail = false;
+    assert.equal((await call("GET", `/api/kid/${kid.id}/memo/${r.body.id}`)).status, 200);
+  } finally {
+    server.close();
+  }
+});

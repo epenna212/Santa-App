@@ -286,6 +286,8 @@ export function createApp({
     try {
       send(await memos.get(req.family.id, child.id, msg.id, msg.text, tts));
     } catch (err) {
+      req.family.memoUsage.count = Math.max(0, req.family.memoUsage.count - 1); // failures don't count
+      store.save();
       console.error("Voice memo failed:", err.message);
       res.status(502).json({ error: "Santa's voice memo got lost in the snow." });
     }
