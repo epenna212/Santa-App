@@ -348,8 +348,11 @@ function kidPanel(child, refresh) {
         el("h3", {}, `🎁 Wish list (${child.wishes.length})`),
         child.wishes.length
           ? el("ul", { class: "list" }, child.wishes.map((w) =>
-              el("li", {}, el("span", { class: "txt" }, w.item), el("time", {}, when(w.at)),
-                el("button", { class: "ghost", "aria-label": `Remove ${w.item}`, onclick: async () => (await api("DELETE", `/api/parent/children/${child.id}/wishes/${w.id}`), refresh()) }, "✕"))))
+              el("li", { class: "wish" },
+                el("div", { class: "wish-top" },
+                  el("span", { class: "txt" }, w.item), el("time", {}, when(w.at)),
+                  el("button", { class: "ghost", "aria-label": `Remove ${w.item}`, onclick: async () => (await api("DELETE", `/api/parent/children/${child.id}/wishes/${w.id}`), refresh()) }, "✕")),
+                shopLinks(w.item))))
           : el("p", { class: "muted" }, `No wishes yet. When ${child.name} texts Santa, wishes show up here.`),
         el("form", { class: "row", onsubmit: async (e) => { e.preventDefault(); if (!wishInput.value.trim()) return; await api("POST", `/api/parent/children/${child.id}/wishes`, { item: wishInput.value }); refresh(); } },
           wishInput, el("button", { class: "shrink secondary", type: "submit" }, "Add")),
@@ -371,6 +374,21 @@ function kidPanel(child, refresh) {
       ),
     ),
   );
+}
+
+// Search links to stores, so grown-ups can compare prices on each wish.
+const STORES = [
+  { name: "Compare prices", url: (q) => `https://www.google.com/search?tbm=shop&q=${q}` },
+  { name: "Amazon", url: (q) => `https://www.amazon.com/s?k=${q}` },
+  { name: "Walmart", url: (q) => `https://www.walmart.com/search?q=${q}` },
+  { name: "Target", url: (q) => `https://www.target.com/s?searchTerm=${q}` },
+  { name: "eBay", url: (q) => `https://www.ebay.com/sch/i.html?_nkw=${q}` },
+];
+function shopLinks(item) {
+  const q = encodeURIComponent(item);
+  return el("div", { class: "shop", "aria-label": `Shop for ${item}` },
+    el("span", { class: "shop-label" }, "🛒 Shop:"),
+    STORES.map((s) => el("a", { href: s.url(q), target: "_blank", rel: "noopener noreferrer" }, s.name)));
 }
 
 function settingsPanel(data, refresh) {
