@@ -50,3 +50,7 @@ npm test
 
 - Data is stored in one JSON file, which is fine for a single household. Use a real database if you host many families.
 - Grown-up sessions are kept in memory, so restarting the server means logging in again. PIN guesses are rate-limited.
+
+## Hosted version (no setup)
+
+`artifact/text-santa.html` is a single-page version that runs as a Claude artifact. It saves the family's data in the artifact's own database and gets Santa's replies from Claude through the viewer's Claude account, so it needs no server or API key. Real SMS is only available in the Node app.

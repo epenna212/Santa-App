@@ -1,0 +1,623 @@
+<title>Text Santa</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600;700&display=swap">
+<style>
+/* Layout: one centered column; a phone-style chat for texting, a ledger-like "Santa's Book" for grown-ups. */
+:root {
+  --bg: #fbf4ea; --card: #ffffff; --fg: #2b1c16; --muted: #7d6a5f; --line: #eadccd;
+  --red: #b52a1f; --red-ink: #ffffff; --green: #1f6a3d; --gold: #d99a1e;
+  --bubble-santa: #f1e7dc; --bubble-me: #2f73e0; --bubble-me-ink: #ffffff;
+  --nice: #1f8a4c; --naughty: #c0392b;
+  --font-display: "Fredoka", "Nunito", ui-rounded, system-ui, sans-serif;
+  --font-body: "Nunito", ui-rounded, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --radius: 18px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #1a1210; --card: #271c19; --fg: #f6ebe2; --muted: #b9a497; --line: #3c2d28;
+  --red: #d2473a; --green: #2f8a55; --bubble-santa: #3a2b26; --bubble-me: #3d7ff0; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #1a1210; --card: #271c19; --fg: #f6ebe2; --muted: #b9a497; --line: #3c2d28;
+  --red: #d2473a; --green: #2f8a55; --bubble-santa: #3a2b26; --bubble-me: #3d7ff0; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font: 16px/1.45 var(--font-body);
+  background-image: radial-gradient(circle at 15% 0%, color-mix(in srgb, var(--red) 12%, transparent), transparent 40%),
+    radial-gradient(circle at 90% 5%, color-mix(in srgb, var(--green) 12%, transparent), transparent 40%); }
+main { max-width: 760px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; gap: 12px;
+  padding-block: 16px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 600; margin: 0; line-height: 1.15; text-wrap: balance; }
+h1 { font-size: clamp(30px, 7vw, 44px); }
+h2 { font-size: 22px; }
+h3 { font-size: 18px; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.small { font-size: 14px; }
+.center { text-align: center; }
+.stack { display: flex; flex-direction: column; gap: 10px; }
+
+.hero { text-align: center; padding: 20px 8px 4px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.hero .santa { font-size: 68px; line-height: 1; animation: bob 3s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(-5px) rotate(-3deg); } }
+.countdown { background: var(--green); color: #fff; border-radius: 999px; padding: 6px 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.pick { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 10px; border: 2px solid var(--line);
+  border-radius: var(--radius); background: var(--card); color: var(--fg); font: 600 20px var(--font-display); cursor: pointer; transition: transform .1s, border-color .1s; }
+.pick:hover, .pick:focus-visible { border-color: var(--red); transform: translateY(-2px); outline: none; }
+.pick .emoji { font-size: 40px; }
+
+button { font: 700 16px var(--font-body); border: 0; border-radius: 999px; padding: 10px 18px; cursor: pointer;
+  background: var(--red); color: var(--red-ink); display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+button:hover { filter: brightness(.92); }
+button:focus-visible, a:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+button.green { background: var(--green); color: #fff; }
+button.ghost { background: none; color: var(--muted); padding: 4px 8px; font-weight: 400; }
+button.ghost:hover { color: var(--naughty); filter: none; }
+button:disabled { opacity: .5; cursor: default; }
+input { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; width: 100%; min-width: 0; }
+input:focus { outline: 2px solid var(--red); border-color: transparent; }
+label { font-weight: 700; display: block; margin-bottom: 4px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row > * { flex: 1 1 120px; min-width: 0; }
+.row > .shrink { flex: 0 0 auto; }
+.error { color: var(--naughty); font-weight: 700; min-height: 1.2em; }
+
+/* chat */
+.phone { flex: 1; display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 26px; overflow: hidden; min-height: 70vh; max-height: calc(100dvh - 32px); }
+.phone header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.phone header .avatar { font-size: 32px; }
+.phone header .who { flex: 1; min-width: 0; }
+.phone header .who b { display: block; font: 600 18px var(--font-display); }
+.phone header .who span { font-size: 13px; color: var(--green); font-weight: 700; }
+.messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+.bubble { max-width: 78%; padding: 9px 14px; border-radius: 20px; white-space: pre-wrap; overflow-wrap: anywhere; animation: pop .18s ease-out; }
+@keyframes pop { from { transform: scale(.94); } }
+.bubble.santa { align-self: flex-start; background: var(--bubble-santa); border-bottom-left-radius: 6px; }
+.bubble.me { align-self: flex-end; background: var(--bubble-me); color: var(--bubble-me-ink); border-bottom-right-radius: 6px; }
+.bubble.note { align-self: center; color: var(--muted); font-size: 13px; text-align: center; max-width: 95%; padding: 2px 8px; }
+.typing { align-self: flex-start; background: var(--bubble-santa); border-radius: 20px; padding: 12px 16px; display: flex; gap: 4px; }
+.typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite; }
+.typing i:nth-child(2) { animation-delay: .2s; } .typing i:nth-child(3) { animation-delay: .4s; }
+@keyframes blink { 50% { opacity: .25; } }
+.composer { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+.composer input { border-radius: 999px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 10px 10px; }
+.chip { background: var(--bg); border: 1px solid var(--line); color: var(--fg); font-weight: 600; font-size: 14px; padding: 6px 12px; }
+
+/* Santa's Book */
+.topbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.topbar h1 { flex: 1 0 100%; font-size: 28px; }
+.topbar .spacer { flex: 1; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tabs button { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+.tabs button[aria-selected="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.kid-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.kid-head h2 { flex: 1; }
+.badge { border-radius: 999px; padding: 4px 12px; font-weight: 700; font-size: 14px; color: #fff; }
+.meter { height: 14px; border-radius: 999px; background: linear-gradient(90deg, var(--naughty), var(--gold) 50%, var(--nice)); position: relative; margin: 10px 13px 0; }
+.meter .dot { position: absolute; top: 50%; width: 28px; height: 28px; transform: translate(-50%, -50%); background: var(--card); border: 3px solid var(--fg); border-radius: 50%; display: grid; place-items: center; font-size: 14px; }
+.meter-labels { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+ul.list { list-style: none; padding: 0; margin: 0; }
+ul.list li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+ul.list li:last-child { border-bottom: 0; }
+ul.list li .txt { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+ul.list li time { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.cols { display: grid; gap: 12px; grid-template-columns: 1fr; }
+@media (min-width: 640px) { .cols { grid-template-columns: 1fr 1fr; } }
+.quick { display: flex; gap: 8px; } .quick button { flex: 1; }
+details summary { cursor: pointer; font-weight: 700; }
+.transcript { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-top: 8px; }
+.confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+@media (prefers-reduced-motion: reduce) { .hero .santa, .bubble, .typing i { animation: none; } }
+</style>
+
+<main id="app" aria-live="polite">
+  <section class="hero">
+    <span class="santa" aria-hidden="true">🎅</span>
+    <h1>Text Santa!</h1>
+    <p class="muted">Opening the North Pole mailbox…</p>
+  </section>
+</main>
+
+<script>
+(() => {
+const app = document.getElementById("app");
+let db = null, sample = null, user = null;
+let readOnly = false;
+
+// ---------- helpers ----------
+function el(tag, attrs = {}, ...kids) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else if (k === "class") node.className = v;
+    else if (k === "style") node.style.cssText = v;
+    else node.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) node.append(kid.nodeType ? kid : String(kid));
+  return node;
+}
+const render = (...nodes) => app.replaceChildren(...nodes);
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)).replace(/[^\w-]/g, "");
+const when = (iso) => new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const nowIso = () => new Date().toISOString();
+const pick = (a) => a[Math.floor(Math.random() * a.length)];
+
+function daysUntilChristmas(now = new Date()) {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let x = new Date(now.getFullYear(), 11, 25);
+  if (today > x) x = new Date(now.getFullYear() + 1, 11, 25);
+  return Math.round((x - today) / 86400000);
+}
+function countdown() {
+  const d = daysUntilChristmas();
+  return el("div", { class: "countdown" }, d === 0 ? "🎄 It's Christmas! 🎄" : `🎄 ${d} day${d === 1 ? "" : "s"} until Christmas`);
+}
+function withTimeout(p, ms = 10000) {
+  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej({ code: "timeout", message: "The North Pole is slow to answer. Please reopen the page." }), ms))]);
+}
+async function sha256(text) {
+  if (crypto.subtle) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  let h = 0; for (const c of text) h = (h * 31 + c.charCodeAt(0)) | 0; return "x" + h;
+}
+
+// ---------- data (db capability) ----------
+// family/settings  {setup, pinSalt, pinHash}
+// kids/<id>        {name, age, wishes:[{id,item,at}], createdAt}
+// chats/<id>       {messages:[{from,text,at}]}
+// reports/<id>     {items:[{id,kind,note,at}]}    grown-ups only
+// grownups/chat    {messages:[...]}               grown-ups only
+async function getDoc(path) {
+  const s = await withTimeout(db.doc(path).get());
+  return s.exists ? s.data() : null;
+}
+async function setDoc(path, data) {
+  try { await db.doc(path).set(data); }
+  catch (e) {
+    if (e && e.code === "unavailable") { await new Promise((r) => setTimeout(r, 400 + Math.random() * 600)); return db.doc(path).set(data); }
+    if (e && e.code === "invalid_argument") readOnly = true;
+    throw e;
+  }
+}
+async function loadKids() {
+  const snap = await withTimeout(db.collection("kids").orderBy("createdAt").get());
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+const cap = (arr, n) => (arr.length > n ? arr.slice(arr.length - n) : arr);
+async function appendMessages(path, msgs) {
+  const doc = (await getDoc(path)) || { messages: [] };
+  doc.messages = cap([...(doc.messages || []), ...msgs], 150);
+  await setDoc(path, doc);
+  return doc.messages;
+}
+function niceScore(reports) {
+  let s = 70;
+  for (const r of reports || []) s += r.kind === "nice" ? 6 : -8;
+  return Math.max(0, Math.min(100, s));
+}
+function verdict(score) {
+  return score >= 80 ? "Very Nice" : score >= 60 ? "Nice" : score >= 40 ? "A Little Naughty" : "Naughty (for now!)";
+}
+
+// grown-up unlock lives only in this tab
+let unlocked = false;
+try { unlocked = sessionStorage.getItem("santa_unlocked") === "1"; } catch {}
+function setUnlocked(v) { unlocked = v; try { v ? sessionStorage.setItem("santa_unlocked", "1") : sessionStorage.removeItem("santa_unlocked"); } catch {} }
+
+// ---------- Santa's brain ----------
+const KID_RULES = `You are Santa Claus, texting with a child from the North Pole. You are warm, jolly, playful and kind.
+- Keep every reply short like a real text: 1-3 sentences, simple words a young child can read. An emoji or "Ho ho ho!" now and then is welcome.
+- Be curious about the child: ask what they'd like for Christmas, what they've been up to, and nice things they've done.
+- Gently encourage kindness, sharing, helping at home and listening to grown-ups. Never shame or scare the child, and never threaten the naughty list.
+- Never promise a specific present will arrive. Say things like "I'll see what the elves can do!" or "I've added it to my list!".
+- Never ask for or repeat personal details (address, school, last name, passwords, photos). If shared, don't repeat them; steer back to Christmas fun.
+- Stay on wholesome Christmas topics. Do not discuss whether Santa is real; stay in character.
+- If the child says something suggesting they are hurt, unsafe, or very sad, respond with care and encourage them to tell a parent or another trusted grown-up right away.`;
+
+const PARENT_RULES = `You are Santa Claus, texting privately with a parent or guardian. They are your trusted helper and tell you how their children have been behaving (naughty or nice) and sometimes what the children want. The children never see these messages.
+- Warm, jolly, brief (1-3 sentences), with a knowing wink between grown-ups. Thank them for the report and confirm what you noted.
+- If they mention a child who isn't in the family list, ask which child they mean.
+- If something sounds like a real safety concern, gently suggest appropriate real-world help instead of joking about it.`;
+
+function transcript(messages, meLabel) {
+  return messages.slice(-24).map((m) => `${m.from === "santa" ? "Santa" : meLabel}: ${m.text}`).join("\n");
+}
+
+async function santaForKid(kid, messages, reports, reportsVisible) {
+  const score = niceScore(reports);
+  if (sample) {
+    const prompt = `${KID_RULES}
+
+Facts for this conversation:
+- Child's first name: ${kid.name}${kid.age ? `, age ${kid.age}` : ""}.
+- Days until Christmas: ${daysUntilChristmas()}.
+- Already on their wish list: ${(kid.wishes || []).map((w) => w.item).join(", ") || "(nothing yet)"}.
+${reportsVisible ? `- Their grown-ups' reports put them on the "${verdict(score)}" side. Never quote a report or say a grown-up told you. You may hint that "the elves" ${score >= 60 ? "have noticed them doing nice things." : "know they can keep trying to be kind and helpful."}` : ""}
+
+Conversation so far (the last line is the child's newest message):
+${transcript(messages, kid.name)}
+
+Reply with only a JSON object: {"reply": "Santa's next text", "new_wishes": ["short gift names the child asked for in their newest message that are not already on the list"]}. Example: {"reply": "Ho ho ho! A red bike? I've added it to my list! 🚲", "new_wishes": ["red bike"]}`;
+    try {
+      const out = await sample.json(prompt, { cache: false });
+      if (out && typeof out.reply === "string" && out.reply.trim()) {
+        return { reply: out.reply.trim(), newWishes: Array.isArray(out.new_wishes) ? out.new_wishes.map(String).filter(Boolean) : [] };
+      }
+    } catch (e) { console.warn("Santa fell back to offline replies:", e && e.code); }
+  }
+  return offlineKid(kid, messages[messages.length - 1].text, score);
+}
+
+async function santaForGrownup(kids, messages) {
+  if (sample) {
+    const prompt = `${PARENT_RULES}
+
+Facts:
+- The family's children: ${kids.map((k) => `${k.name}${k.age ? ` (age ${k.age})` : ""}, wish list: ${(k.wishes || []).map((w) => w.item).join(", ") || "empty"}`).join("; ") || "none yet"}.
+- Days until Christmas: ${daysUntilChristmas()}.
+
+Conversation so far (the last line is the grown-up's newest message):
+${transcript(messages, "Grown-up")}
+
+Reply with only a JSON object:
+{"reply": "Santa's next text", "reports": [{"child_name": "exact name from the list", "kind": "nice" or "naughty", "note": "short neutral summary under 15 words"}], "wishes": [{"child_name": "exact name", "item": "gift"}]}
+Include one report per behavior in the newest message, and only gifts the grown-up says a child wants that aren't already listed. Use empty arrays when there is nothing to record.`;
+    try {
+      const out = await sample.json(prompt, { cache: false });
+      if (out && typeof out.reply === "string" && out.reply.trim()) {
+        const find = (n) => kids.find((k) => k.name.toLowerCase() === String(n || "").trim().toLowerCase());
+        return {
+          reply: out.reply.trim(),
+          reports: (Array.isArray(out.reports) ? out.reports : []).map((r) => ({ kid: find(r.child_name), kind: r.kind, note: String(r.note || "") })).filter((r) => r.kid && (r.kind === "nice" || r.kind === "naughty")),
+          wishes: (Array.isArray(out.wishes) ? out.wishes : []).map((w) => ({ kid: find(w.child_name), item: String(w.item || "") })).filter((w) => w.kid && w.item.trim()),
+        };
+      }
+    } catch (e) { console.warn("Santa fell back to offline replies:", e && e.code); }
+  }
+  return offlineGrownup(kids, messages[messages.length - 1].text);
+}
+
+// Offline Santa (used if Claude can't be reached)
+function extractWishes(text) {
+  const wishes = [];
+  const re = /\b(?:i\s+(?:really\s+|would\s+)?(?:want|wish\s+for|would\s+like|'d\s+like|need|hope\s+(?:for|to\s+get))|can\s+i\s+(?:please\s+)?(?:have|get)|please\s+bring(?:\s+me)?|bring\s+me|my\s+wish\s+is|for\s+christmas\s+i\s+want)\s+(?:a|an|some|the|my|to\s+get\s+(?:a|an)?)?\s*([^.!?\n]+)/gi;
+  for (const m of text.matchAll(re)) for (const part of m[1].split(/,|\band\b|\balso\b|\bplus\b/i)) {
+    const item = part.replace(/\b(please|for christmas|santa|too|from you)\b/gi, "").replace(/^\s*(a|an|some|the)\s+/i, "").replace(/[^\w\s'-]/g, "").trim();
+    if (item && item.split(/\s+/).length <= 6 && !/^(to|you|it|that|this)$/i.test(item)) wishes.push(item);
+  }
+  return wishes;
+}
+function offlineKid(kid, text, score) {
+  const have = (kid.wishes || []).map((w) => w.item.toLowerCase());
+  const newWishes = extractWishes(text).filter((w) => !have.includes(w.toLowerCase()));
+  const days = daysUntilChristmas();
+  let reply;
+  if (newWishes.length) reply = `Ho ho ho! I've written down ${newWishes.join(" and ")} on my list, ${kid.name}! 📝 I'll see what the elves can do. What else is on your mind?`;
+  else if (/\b(hi|hello|hey)\b/i.test(text)) reply = `Ho ho ho! Hello ${kid.name}! 🎅 Only ${days} days until Christmas! What would you like this year?`;
+  else if (/\b(help|helped|shared|nice|clean|kind|chores?)\b/i.test(text)) reply = pick([`That's wonderful, ${kid.name}! Kindness makes my sleigh fly faster! ✨`, `Ho ho ho! The elves will be so proud to hear that, ${kid.name}! 🌟`]);
+  else if (/\b(reindeer|rudolph)\b/i.test(text)) reply = `The reindeer practice flying every night! 🦌 Rudolph says hi, ${kid.name}!`;
+  else if (/\b(naughty|nice) list\b|\bam i (on|nice|naughty)\b/i.test(text)) reply = score >= 60 ? `The elves tell me you've been doing lots of nice things, ${kid.name}! Keep it up! 🎄` : `Every day is a new chance to be kind, ${kid.name}! I believe in you! 💫`;
+  else reply = pick([`Ho ho ho! Tell me more, ${kid.name}! What would you love to find under the tree? 🎁`, `Mrs. Claus just baked cookies 🍪 What have you been up to, ${kid.name}?`]);
+  return { reply, newWishes };
+}
+const NICE_WORDS = /\b(nice|good|great|kind|sweet|helped|helping|helpful|shared|sharing|cleaned|clean(?:ed)? up|polite|brave|gentle|patient|listened|tidied|thanked|said (?:please|thank you|sorry)|apologi[sz]ed|without being asked|set the table|fed the|practiced|finished|did (?:his|her|their) (?:homework|chores))\b/i;
+const NAUGHTY_WORDS = /\b(naughty|bad|hit|hitting|bit|biting|lied|lying|tantrum|yelled|screamed|refused|rude|mean|fought|fighting|broke|didn'?t listen|talked back|whin(?:ed|ing))\b/i;
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function offlineGrownup(kids, text) {
+  const reports = [], wishes = [];
+  for (const s of text.split(/(?<=[.!?\n])\s*/)) {
+    const named = kids.filter((k) => new RegExp(`\\b${escRe(k.name)}\\b`, "i").test(s));
+    const targets = named.length ? named : kids.length === 1 ? kids : [];
+    const naughty = NAUGHTY_WORDS.test(s), nice = !naughty && NICE_WORDS.test(s);
+    for (const kid of targets) {
+      if (naughty || nice) reports.push({ kid, kind: naughty ? "naughty" : "nice", note: s.trim().slice(0, 140) });
+      const w = s.match(/\b(?:wants?|asked for|would love|is hoping for)\s+(?:a|an|some|the)?\s*([^.!?\n]+)/i);
+      if (w) wishes.push({ kid, item: w[1].trim() });
+    }
+  }
+  let reply;
+  if (reports.length) reply = `Ho ho ho, thank you! I've noted it in my book. ${reports.map((r) => `${r.kid.name}: ${r.kind === "nice" ? "nice ✅" : "naughty ⚠️"}`).join(", ")}. 🎅📖`;
+  else if (wishes.length) reply = `Got it! I've added ${wishes.map((w) => `${w.item} for ${w.kid.name}`).join(" and ")} to the list. 🎁`;
+  else reply = kids.length ? `Ho ho ho! How has ${kids.map((k) => k.name).join(" or ")} been? Naughty or nice? (e.g. "${kids[0].name} helped set the table tonight")` : "Ho ho ho! Add your children in Santa's Book first.";
+  return { reply, reports, wishes };
+}
+
+// recording helpers
+async function addWishes(kidId, items) {
+  if (!items.length) return;
+  const kid = await getDoc(`kids/${kidId}`);
+  if (!kid) return;
+  kid.wishes = kid.wishes || [];
+  for (const raw of items) {
+    const item = String(raw).trim().slice(0, 120);
+    if (item && !kid.wishes.some((w) => w.item.toLowerCase() === item.toLowerCase())) kid.wishes.push({ id: uid(), item, at: nowIso() });
+  }
+  await setDoc(`kids/${kidId}`, kid);
+}
+async function addReport(kidId, kind, note) {
+  const doc = (await getDoc(`reports/${kidId}`)) || { items: [] };
+  doc.items = cap([...(doc.items || []), { id: uid(), kind, note: String(note).trim().slice(0, 300) || (kind === "nice" ? "Nice!" : "Naughty"), at: nowIso() }], 300);
+  await setDoc(`reports/${kidId}`, doc);
+}
+
+// ---------- views ----------
+let kidsCache = [];
+
+async function start() {
+  db = await claude.use("db");
+  if (!db) {
+    return render(el("section", { class: "hero" }, el("span", { class: "santa" }, "🎅"), el("h1", {}, "Text Santa!"),
+      el("p", { class: "muted" }, "Santa's mailbox needs you to be signed in to Claude. Sign in and reopen this page to start texting Santa.")));
+  }
+  claude.use("sample").then((s) => (sample = s));
+  claude.use("user").then(async (u) => { user = u; if (u) { const w = await u.can("data.write"); if (w === false) readOnly = true; } });
+  await home();
+}
+
+async function home() {
+  let settings, kids;
+  try { [settings, kids] = await Promise.all([getDoc("family/settings"), loadKids()]); }
+  catch (e) { return render(el("p", { class: "error" }, e.message || "Couldn't reach the North Pole. Please reopen the page.")); }
+  kidsCache = kids;
+  if (!settings || !settings.setup) return setupView();
+  render(
+    el("section", { class: "hero" },
+      el("span", { class: "santa", "aria-hidden": "true" }, "🎅"),
+      el("h1", {}, "Text Santa!"),
+      el("p", { class: "muted" }, "Tell Santa what you want for Christmas."),
+      countdown()),
+    el("div", { class: "card" },
+      el("h2", {}, "Who's texting Santa?"),
+      el("div", { class: "grid" },
+        kids.map((k, i) => el("button", { class: "pick", type: "button", onclick: () => kidChat(k.id) }, el("span", { class: "emoji" }, ["🧒", "👧", "👦", "🧑", "👶"][i % 5]), k.name)),
+        el("button", { class: "pick", type: "button", onclick: () => grownupGate(book) }, el("span", { class: "emoji" }, "🧑‍🎄"), "Grown-up"))),
+    el("p", { class: "center muted small" }, "Grown-ups: tap Grown-up to see wish lists and tell Santa who's been naughty or nice."),
+  );
+}
+
+function setupView() {
+  const kidsBox = el("div", { class: "stack" });
+  let n = 0;
+  const addRow = () => { n++; kidsBox.append(el("div", { class: "row" },
+    el("input", { id: `kname${n}`, name: "kname", placeholder: "Child's first name", "aria-label": "Child's first name", maxlength: 40 }),
+    el("input", { id: `kage${n}`, name: "kage", type: "number", min: 1, max: 17, placeholder: "Age", "aria-label": "Age", style: "flex:0 0 90px" }))); };
+  addRow();
+  const err = el("p", { class: "error" });
+  const form = el("form", { class: "card", async onsubmit(e) {
+    e.preventDefault();
+    const f = new FormData(form);
+    const names = f.getAll("kname"), ages = f.getAll("kage");
+    const kids = names.map((name, i) => ({ name: String(name).trim(), age: ages[i] ? Number(ages[i]) : null })).filter((k) => k.name);
+    const pin = String(f.get("pin") || "");
+    if (!kids.length) return (err.textContent = "Add at least one child's name.");
+    if (!/^\d{4,8}$/.test(pin)) return (err.textContent = "Choose a PIN of 4 to 8 digits.");
+    if (pin !== f.get("pin2")) return (err.textContent = "The two PINs don't match. Type them again.");
+    try {
+      const salt = uid();
+      const base = Date.now();
+      for (const [i, k] of kids.entries()) await setDoc(`kids/${uid()}`, { name: k.name.slice(0, 40), age: k.age, wishes: [], createdAt: base + i });
+      await setDoc("family/settings", { setup: true, pinSalt: salt, pinHash: await sha256(salt + pin) });
+      setUnlocked(true);
+      book();
+    } catch (e2) { err.textContent = readOnly ? "Only the person who owns this page can set it up." : "Couldn't save. Please try again."; }
+  } },
+    el("h2", {}, "Welcome to the North Pole! 🎄"),
+    el("p", { class: "muted" }, "Grown-ups: add your children and choose a PIN. The PIN keeps Santa's Book (wish lists and naughty-or-nice reports) away from little eyes."),
+    el("label", {}, "Your children"), kidsBox,
+    el("div", {}, el("button", { type: "button", class: "secondary", onclick: addRow }, "+ Add another child")),
+    el("div", { class: "row" },
+      el("div", {}, el("label", { for: "pin" }, "Grown-up PIN (4-8 digits)"), el("input", { id: "pin", name: "pin", type: "password", inputmode: "numeric", autocomplete: "new-password" })),
+      el("div", {}, el("label", { for: "pin2" }, "Type the PIN again"), el("input", { id: "pin2", name: "pin2", type: "password", inputmode: "numeric", autocomplete: "new-password" }))),
+    err,
+    el("div", {}, el("button", { type: "submit" }, "Start texting Santa 🎅")));
+  render(el("section", { class: "hero" }, el("span", { class: "santa", "aria-hidden": "true" }, "🎅"), el("h1", {}, "Text Santa"), countdown()), form);
+}
+
+let attempts = 0, lockedUntil = 0;
+function grownupGate(next) {
+  if (unlocked) return next();
+  const err = el("p", { class: "error" });
+  const input = el("input", { id: "pin-enter", type: "password", inputmode: "numeric", autocomplete: "current-password", placeholder: "PIN", "aria-label": "PIN" });
+  const form = el("form", { class: "card", async onsubmit(e) {
+    e.preventDefault();
+    if (Date.now() < lockedUntil) return (err.textContent = "Too many tries. Wait a minute, then try again.");
+    const s = await getDoc("family/settings").catch(() => null);
+    if (s && (await sha256(s.pinSalt + input.value)) === s.pinHash) { attempts = 0; setUnlocked(true); return next(); }
+    input.value = "";
+    if (++attempts >= 5) { attempts = 0; lockedUntil = Date.now() + 60000; }
+    err.textContent = "That PIN isn't right.";
+  } },
+    el("h2", {}, "🔒 Grown-ups only"),
+    el("p", { class: "muted" }, "Enter your PIN to open Santa's Book."),
+    el("div", { class: "row" }, input, el("button", { class: "shrink", type: "submit" }, "Open")),
+    err);
+  render(el("div", {}, el("button", { class: "secondary", onclick: home }, "← Back")), form);
+  input.focus();
+}
+
+// ----- chat shell -----
+function chatShell({ title, subtitle, onBack, messages, placeholder, chips = [], onSend }) {
+  const list = el("div", { class: "messages", role: "log" });
+  const add = (from, text) => { list.append(el("div", { class: `bubble ${from === "santa" ? "santa" : from === "note" ? "note" : "me"}` }, text)); list.scrollTop = list.scrollHeight; };
+  messages.forEach((m) => add(m.from, m.text));
+  const input = el("input", { id: "msg", placeholder, "aria-label": "Message", autocomplete: "off", maxlength: 500 });
+  const sendBtn = el("button", { type: "submit" }, "Send");
+  let busy = false;
+  async function send(text) {
+    text = text.trim();
+    if (!text || busy) return;
+    if (text.endsWith("…")) { input.value = text.slice(0, -1) + " "; input.focus(); return; }
+    busy = true; sendBtn.disabled = true; input.value = "";
+    add("me", text);
+    const typing = el("div", { class: "typing", "aria-label": "Santa is typing" }, el("i"), el("i"), el("i"));
+    list.append(typing); list.scrollTop = list.scrollHeight;
+    try { await onSend(text, add); }
+    catch (e) { add("note", readOnly ? "You can read this chat, but only the family can send messages." : "Santa's message got lost in the snow. Please send it again."); }
+    finally { typing.remove(); busy = false; sendBtn.disabled = false; input.focus(); }
+  }
+  render(el("section", { class: "phone" },
+    el("header", {},
+      el("button", { class: "secondary", "aria-label": "Back", onclick: onBack }, "←"),
+      el("span", { class: "avatar", "aria-hidden": "true" }, "🎅"),
+      el("div", { class: "who" }, el("b", {}, title), el("span", {}, subtitle))),
+    list,
+    chips.length ? el("div", { class: "chips" }, chips.map((c) => el("button", { type: "button", class: "chip", onclick: () => send(c) }, c))) : null,
+    el("form", { class: "composer", onsubmit: (e) => { e.preventDefault(); send(input.value); } }, input, sendBtn)));
+  input.focus();
+}
+
+async function kidChat(kidId) {
+  const [kid, chat] = await Promise.all([getDoc(`kids/${kidId}`), getDoc(`chats/${kidId}`)]).catch(() => []);
+  if (!kid) return home();
+  const msgs = (chat && chat.messages) || [];
+  chatShell({
+    title: "Santa Claus", subtitle: "● North Pole", onBack: home,
+    messages: msgs.length ? msgs : [{ from: "santa", text: `Ho ho ho! Hi ${kid.name}! 🎅 It's Santa! What would you like for Christmas this year?` }],
+    placeholder: `Text Santa, ${kid.name}…`,
+    chips: ["Hi Santa! 👋", "For Christmas I want…", "I was nice today!", "How are the reindeer? 🦌"],
+    async onSend(text, add) {
+      const all = await appendMessages(`chats/${kidId}`, [{ from: "kid", text, at: nowIso() }]);
+      const fresh = (await getDoc(`kids/${kidId}`)) || kid;
+      const rep = await getDoc(`reports/${kidId}`).catch(() => null);
+      const { reply, newWishes } = await santaForKid(fresh, all, rep && rep.items, !!rep);
+      await addWishes(kidId, newWishes);
+      await appendMessages(`chats/${kidId}`, [{ from: "santa", text: reply, at: nowIso() }]);
+      add("santa", reply);
+    },
+  });
+}
+
+async function grownupChat() {
+  const [kids, chat] = await Promise.all([loadKids(), getDoc("grownups/chat")]);
+  const names = kids.map((k) => k.name);
+  const msgs = (chat && chat.messages) || [];
+  chatShell({
+    title: "Santa (grown-ups line)", subtitle: "● Private: kids can't see this", onBack: book,
+    messages: msgs.length ? msgs : [{ from: "santa", text: `Ho ho ho! Thanks for helping me keep my list. How have ${names.join(" and ") || "the kids"} been? Tell me the naughty and the nice! 🎅📖` }],
+    placeholder: names[0] ? `e.g. ${names[0]} shared toys today` : "Tell Santa how the kids have been",
+    chips: names.slice(0, 2).flatMap((n) => [`${n} was really nice today`, `${n} was a little naughty today`]),
+    async onSend(text, add) {
+      const all = await appendMessages("grownups/chat", [{ from: "grownup", text, at: nowIso() }]);
+      const kidsNow = await loadKids();
+      const { reply, reports, wishes } = await santaForGrownup(kidsNow, all);
+      for (const r of reports) await addReport(r.kid.id, r.kind, r.note);
+      for (const w of wishes) await addWishes(w.kid.id, [w.item]);
+      await appendMessages("grownups/chat", [{ from: "santa", text: reply, at: nowIso() }]);
+      add("santa", reply);
+      for (const r of reports) add("note", `📖 Recorded ${r.kind === "nice" ? "NICE ✅" : "NAUGHTY ⚠️"} for ${r.kid.name}: ${r.note}`);
+      for (const w of wishes) add("note", `🎁 Added "${w.item}" to ${w.kid.name}'s wish list`);
+    },
+  });
+}
+
+// ----- Santa's Book -----
+let tab = null;
+async function book() {
+  if (!unlocked) return grownupGate(book);
+  let kids;
+  try { kids = await loadKids(); } catch (e) { return render(el("p", { class: "error" }, "Couldn't open Santa's Book. Please reopen the page.")); }
+  const extras = await Promise.all(kids.map((k) => Promise.all([getDoc(`reports/${k.id}`).catch(() => null), getDoc(`chats/${k.id}`).catch(() => null)])));
+  kids.forEach((k, i) => { k.reports = (extras[i][0] && extras[i][0].items) || []; k.messages = (extras[i][1] && extras[i][1].messages) || []; k.score = niceScore(k.reports); });
+  if (!tab || (tab !== "family" && !kids.some((k) => k.id === tab))) tab = kids[0] ? kids[0].id : "family";
+
+  const tabs = el("div", { class: "tabs", role: "tablist" },
+    kids.map((k) => el("button", { role: "tab", "aria-selected": String(tab === k.id), onclick: () => { tab = k.id; book(); } }, `${k.score >= 60 ? "⭐" : "⚠️"} ${k.name}`)),
+    el("button", { role: "tab", "aria-selected": String(tab === "family"), onclick: () => { tab = "family"; book(); } }, "⚙️ Family"));
+
+  render(
+    el("div", { class: "topbar" },
+      el("h1", {}, "📖 Santa's Book"),
+      el("button", { class: "secondary", onclick: home }, "← Home"),
+      el("span", { class: "spacer" }),
+      el("button", { class: "green", onclick: grownupChat }, "💬 Text Santa"),
+      el("button", { class: "secondary", onclick: () => { setUnlocked(false); home(); } }, "Lock")),
+    countdown(), tabs,
+    tab === "family" ? familyPanel(kids) : kidPanel(kids.find((k) => k.id === tab)));
+}
+
+function kidPanel(kid) {
+  const color = kid.score >= 60 ? "var(--nice)" : kid.score >= 40 ? "var(--gold)" : "var(--naughty)";
+  const note = el("input", { id: `note-${kid.id}`, placeholder: `What did ${kid.name} do? (optional)`, "aria-label": "What happened", maxlength: 300 });
+  const report = (kind) => async () => { await addReport(kid.id, kind, note.value); book(); };
+  const wishInput = el("input", { id: `wish-${kid.id}`, placeholder: "Add a gift idea", "aria-label": "Gift idea", maxlength: 120 });
+  const removeWish = async (wid) => { const d = await getDoc(`kids/${kid.id}`); d.wishes = (d.wishes || []).filter((w) => w.id !== wid); await setDoc(`kids/${kid.id}`, d); book(); };
+  const removeReport = async (rid) => { const d = (await getDoc(`reports/${kid.id}`)) || { items: [] }; d.items = d.items.filter((r) => r.id !== rid); await setDoc(`reports/${kid.id}`, d); book(); };
+  return el("div", { class: "stack" },
+    el("div", { class: "card" },
+      el("div", { class: "kid-head" }, el("h2", {}, kid.name, kid.age ? el("span", { class: "muted small" }, ` · age ${kid.age}`) : null), el("span", { class: "badge", style: `background:${color}` }, verdict(kid.score))),
+      el("div", { class: "meter", role: "meter", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": kid.score, "aria-label": "Naughty to nice meter" },
+        el("span", { class: "dot", style: `left:${kid.score}%` }, kid.score >= 60 ? "😇" : "😈")),
+      el("div", { class: "meter-labels" }, el("span", {}, "Naughty"), el("span", {}, "Nice")),
+      note,
+      el("div", { class: "quick" }, el("button", { class: "green", onclick: report("nice") }, "😇 Nice"), el("button", { onclick: report("naughty") }, "😈 Naughty"))),
+    el("div", { class: "cols" },
+      el("div", { class: "card" },
+        el("h3", {}, `🎁 Wish list (${(kid.wishes || []).length})`),
+        (kid.wishes || []).length
+          ? el("ul", { class: "list" }, kid.wishes.map((w) => el("li", {}, el("span", { class: "txt" }, w.item), el("time", {}, when(w.at)), el("button", { class: "ghost", "aria-label": `Remove ${w.item}`, onclick: () => removeWish(w.id) }, "✕"))))
+          : el("p", { class: "muted" }, `No wishes yet. When ${kid.name} texts Santa, gifts they mention show up here.`),
+        el("form", { class: "row", onsubmit: async (e) => { e.preventDefault(); if (wishInput.value.trim()) { await addWishes(kid.id, [wishInput.value]); book(); } } }, wishInput, el("button", { class: "shrink secondary", type: "submit" }, "Add"))),
+      el("div", { class: "card" },
+        el("h3", {}, "📖 Naughty & nice log"),
+        kid.reports.length
+          ? el("ul", { class: "list" }, [...kid.reports].reverse().map((r) => el("li", {}, el("span", {}, r.kind === "nice" ? "😇" : "😈"), el("span", { class: "txt" }, r.note), el("time", {}, when(r.at)), el("button", { class: "ghost", "aria-label": "Remove this report", onclick: () => removeReport(r.id) }, "✕"))))
+          : el("p", { class: "muted" }, "No reports yet. Tap Nice or Naughty above, or text Santa on the grown-ups line."))),
+    el("div", { class: "card" },
+      el("details", {},
+        el("summary", {}, `💬 ${kid.name}'s chat with Santa (${kid.messages.length} messages)`),
+        el("div", { class: "transcript" }, kid.messages.length ? kid.messages.map((m) => el("div", { class: `bubble ${m.from === "santa" ? "santa" : "me"}` }, m.text)) : el("p", { class: "muted" }, "No messages yet.")))));
+}
+
+function familyPanel(kids) {
+  const msg = el("p", { class: "error" });
+  const addForm = el("form", { class: "card", async onsubmit(e) {
+    e.preventDefault();
+    const f = new FormData(addForm);
+    const name = String(f.get("name") || "").trim();
+    if (!name) return (msg.textContent = "Type the child's first name.");
+    const id = uid();
+    await setDoc(`kids/${id}`, { name: name.slice(0, 40), age: f.get("age") ? Number(f.get("age")) : null, wishes: [], createdAt: Date.now() });
+    tab = id; book();
+  } },
+    el("h3", {}, "Add a child"),
+    el("div", { class: "row" },
+      el("input", { id: "add-name", name: "name", placeholder: "First name", "aria-label": "First name", maxlength: 40 }),
+      el("input", { id: "add-age", name: "age", type: "number", min: 1, max: 17, placeholder: "Age", "aria-label": "Age", style: "flex:0 0 90px" }),
+      el("button", { class: "shrink", type: "submit" }, "Add")));
+
+  const pinForm = el("form", { class: "card", async onsubmit(e) {
+    e.preventDefault();
+    const pin = String(new FormData(pinForm).get("newpin") || "");
+    if (!/^\d{4,8}$/.test(pin)) return (msg.textContent = "Choose a PIN of 4 to 8 digits.");
+    const salt = uid();
+    await setDoc("family/settings", { setup: true, pinSalt: salt, pinHash: await sha256(salt + pin) });
+    msg.textContent = "PIN changed ✅";
+    pinForm.reset();
+  } },
+    el("h3", {}, "🔒 Change PIN"),
+    el("div", { class: "row" }, el("input", { id: "newpin", name: "newpin", type: "password", inputmode: "numeric", placeholder: "New PIN (4-8 digits)", "aria-label": "New PIN" }), el("button", { class: "shrink", type: "submit" }, "Save")));
+
+  const removeList = el("ul", { class: "list" }, kids.map((k) => {
+    const li = el("li", {}, el("span", { class: "txt" }, k.name));
+    const ask = el("button", { class: "secondary", onclick: () => {
+      ask.replaceWith(el("span", { class: "confirm" }, el("span", { class: "small" }, "Remove their wishes and chat too?"),
+        el("button", { onclick: async () => { await Promise.all([`kids/${k.id}`, `chats/${k.id}`, `reports/${k.id}`].map((p) => db.doc(p).delete().catch(() => {}))); book(); } }, "Yes, remove"),
+        el("button", { class: "secondary", onclick: book }, "Cancel")));
+    } }, "Remove");
+    li.append(ask);
+    return li;
+  }));
+  return el("div", { class: "stack" }, msg, addForm, pinForm, kids.length ? el("div", { class: "card" }, el("h3", {}, "Remove a child"), removeList) : null,
+    el("p", { class: "muted small" }, "Tip: kids use this same page. Tap Lock before handing over the device, and they'll only see the texting screen."));
+}
+
+start();
+})();
+</script>
