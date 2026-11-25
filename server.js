@@ -4,19 +4,25 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Store, checkSecret, hashSecret, niceScore, verdict, normalizePhone, normalizeEmail } from "./lib/store.js";
 import { replyToKid, replyToParent, aiEnabled, daysUntilChristmas } from "./lib/santa.js";
+import { MemoStore, elevenLabsTts, voiceEnabled } from "./lib/voice.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 const DEVICE_MS = 365 * 24 * 60 * 60 * 1000; // a family stays signed in on a device for a year
 const GROWNUP_MS = 2 * 60 * 60 * 1000; // the PIN unlock lasts 2 hours
 const DEFAULT_DAILY_REPLIES = 300; // Santa replies per family per day (protects your API bill)
+const DEFAULT_DAILY_MEMOS = 30; // new Santa voice memos per family per day (protects your ElevenLabs allowance)
 
 export function createApp({
   store,
   twilioAuthToken = process.env.TWILIO_AUTH_TOKEN,
   publicUrl = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL,
   dailyReplies = Number(process.env.DAILY_REPLIES_PER_FAMILY) || DEFAULT_DAILY_REPLIES,
+  dailyMemos = Number(process.env.VOICE_MEMOS_PER_FAMILY) || DEFAULT_DAILY_MEMOS,
+  memoDir = process.env.MEMO_DIR || (process.env.DATA_FILE ? path.join(path.dirname(process.env.DATA_FILE), "memos") : path.join(here, "data", "memos")),
+  tts = voiceEnabled() ? elevenLabsTts : null,
 } = {}) {
+  const memos = new MemoStore(memoDir);
   const app = express();
   app.set("trust proxy", true);
   app.disable("x-powered-by");
@@ -92,6 +98,7 @@ export function createApp({
       children: req.family ? req.family.children.map(publicChild) : [],
       grownup: req.grownup,
       ai: aiEnabled(),
+      voiceMemos: Boolean(tts),
       daysUntilChristmas: daysUntilChristmas(),
     });
   });
@@ -185,6 +192,7 @@ export function createApp({
   };
   app.delete("/api/parent/children/:id", requireGrownup, withChild((req, res, child) => {
     store.removeChild(req.family, child.id);
+    memos.removeChild(req.family.id, child.id);
     res.json({ ok: true });
   }));
   app.post("/api/parent/children/:id/reports", requireGrownup, withChild((req, res, child) => {
@@ -239,6 +247,7 @@ export function createApp({
     if (!checkSecret(String(req.body?.password || ""), req.family.passwordHash)) {
       return res.status(400).json({ error: "Type your password to delete the account." });
     }
+    memos.removeFamily(req.family.id);
     store.deleteFamily(req.family);
     setCookie(req, res, "", 0);
     res.json({ ok: true });
@@ -259,6 +268,29 @@ export function createApp({
     res.json(await handleKidText(req.family, child, text));
   });
 
+  // Santa's voice memo for one of his messages in a kid's chat.
+  app.get("/api/kid/:id/memo/:mid", requireFamily, async (req, res) => {
+    if (!tts) return res.status(404).json({ error: "Voice memos aren't turned on." });
+    const child = store.child(req.family, req.params.id);
+    if (!child) return res.status(404).json({ error: "Santa can't find that name!" });
+    const msg = store.conversation(req.family, `kid:${child.id}`).find((m) => m.id === req.params.mid && m.from === "santa");
+    if (!msg) return res.status(404).json({ error: "Memo not found." });
+    const send = (file) => {
+      res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+      res.type("audio/mpeg").sendFile(file);
+    };
+    if (memos.has(req.family.id, child.id, msg.id)) return send(memos.file(req.family.id, child.id, msg.id));
+    if (!store.useAllowance(req.family, dailyMemos, "memoUsage")) {
+      return res.status(429).json({ error: "Santa's voice needs a rest. More voice memos tomorrow!" });
+    }
+    try {
+      send(await memos.get(req.family.id, child.id, msg.id, msg.text, tts));
+    } catch (err) {
+      console.error("Voice memo failed:", err.message);
+      res.status(502).json({ error: "Santa's voice memo got lost in the snow." });
+    }
+  });
+
   const RESTING = "Ho ho ho! Santa is resting his eyes for the night. 😴 Text me again tomorrow!";
 
   async function handleKidText(family, child, text) {
@@ -272,8 +304,8 @@ export function createApp({
       for (const w of out.newWishes) store.addWish(child, w);
       reply = out.reply;
     }
-    store.appendMessage(family, key, "santa", reply);
-    return { reply };
+    const msg = store.appendMessage(family, key, "santa", reply);
+    return { reply, id: msg.id };
   }
 
   async function handleParentText(family, text) {
